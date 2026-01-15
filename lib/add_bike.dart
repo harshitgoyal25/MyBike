@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'models/bike_model.dart';
 
 class AddBikeScreen extends StatefulWidget {
-  final Bike? bike; // 👈 null = add, not null = edit
+  final Bike? bike; // null = add, not null = edit
 
   const AddBikeScreen({super.key, this.bike});
 
@@ -15,14 +14,14 @@ class AddBikeScreen extends StatefulWidget {
 class _AddBikeScreenState extends State<AddBikeScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  late TextEditingController _nameController;
-  late TextEditingController _mileageController;
-  late TextEditingController _plateController;
-  late TextEditingController _tankController;
-  late TextEditingController _petrolController;
-  late TextEditingController _odometerController;
+  late TextEditingController nameCtrl;
+  late TextEditingController mileageCtrl;
+  late TextEditingController plateCtrl;
+  late TextEditingController monthlyLimitCtrl;
+  late TextEditingController petrolCtrl;
+  late TextEditingController initialOdoCtrl;
 
-  bool _saving = false;
+  bool saving = false;
 
   bool get isEdit => widget.bike != null;
 
@@ -30,46 +29,51 @@ class _AddBikeScreenState extends State<AddBikeScreen> {
   void initState() {
     super.initState();
 
-    _nameController =
-        TextEditingController(text: widget.bike?.name ?? '');
-    _mileageController =
+    nameCtrl = TextEditingController(text: widget.bike?.name ?? '');
+    mileageCtrl =
         TextEditingController(text: widget.bike?.mileage.toString() ?? '');
-    _plateController =
-        TextEditingController(text: widget.bike?.plate ?? '');
-    _tankController = TextEditingController(
-        text: widget.bike?.fuelTankCapacity.toString() ?? '');
-    _petrolController = TextEditingController(
+    plateCtrl = TextEditingController(text: widget.bike?.plate ?? '');
+    monthlyLimitCtrl = TextEditingController(
+        text: widget.bike?.monthlyLimit.toString() ?? '');
+    petrolCtrl = TextEditingController(
         text: widget.bike?.currentPetrol.toString() ?? '');
-    _odometerController = TextEditingController(
-        text: widget.bike?.initialOdometer.toString() ?? '');
+
+    initialOdoCtrl = TextEditingController(
+      text: widget.bike == null
+          ? ''
+          : widget.bike!.initialOdometer.toString(),
+    );
   }
 
-  Future<void> _saveBike() async {
+  Future<void> saveBike() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _saving = true);
+    setState(() => saving = true);
+
+    final bikesRef = FirebaseFirestore.instance.collection('bikes');
+
+    final double initialOdo =
+        double.tryParse(initialOdoCtrl.text) ?? 0;
 
     final data = {
-      'name': _nameController.text.trim(),
-      'mileage': double.parse(_mileageController.text),
-      'plate': _plateController.text.trim(),
-      'fuelTankCapacity': double.parse(_tankController.text),
-      'currentPetrol': double.parse(_petrolController.text),
-      'initialOdometer': double.parse(_odometerController.text),
+      'name': nameCtrl.text.trim(),
+      'mileage': double.parse(mileageCtrl.text),
+      'plate': plateCtrl.text.trim(),
+      'monthlyLimit': double.parse(monthlyLimitCtrl.text),
+      'currentPetrol': double.parse(petrolCtrl.text),
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
     try {
-      final bikesRef =
-          FirebaseFirestore.instance.collection('bikes');
-
       if (isEdit) {
-        // ✏️ EDIT
+        // ✏️ EDIT BIKE (DO NOT TOUCH ODOMETER)
         await bikesRef.doc(widget.bike!.id).update(data);
       } else {
-        // ➕ ADD
+        // ➕ ADD BIKE
         await bikesRef.add({
           ...data,
+          'initialOdometer': initialOdo,
+          'currentOdometer': initialOdo, // 🔥 IMPORTANT
           'createdAt': FieldValue.serverTimestamp(),
         });
       }
@@ -80,19 +84,39 @@ class _AddBikeScreenState extends State<AddBikeScreen> {
         SnackBar(content: Text(e.toString())),
       );
     } finally {
-      setState(() => _saving = false);
+      if (mounted) setState(() => saving = false);
     }
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _mileageController.dispose();
-    _plateController.dispose();
-    _tankController.dispose();
-    _petrolController.dispose();
-    _odometerController.dispose();
+    nameCtrl.dispose();
+    mileageCtrl.dispose();
+    plateCtrl.dispose();
+    monthlyLimitCtrl.dispose();
+    petrolCtrl.dispose();
+    initialOdoCtrl.dispose();
     super.dispose();
+  }
+
+  Widget field(
+    TextEditingController c,
+    String label, {
+    bool number = true,
+    bool enabled = true,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextFormField(
+        controller: c,
+        enabled: enabled,
+        keyboardType:
+            number ? const TextInputType.numberWithOptions(decimal: true) : null,
+        decoration: InputDecoration(labelText: label),
+        validator: (v) =>
+            v == null || v.trim().isEmpty ? 'Required' : null,
+      ),
+    );
   }
 
   @override
@@ -110,49 +134,37 @@ class _AddBikeScreenState extends State<AddBikeScreen> {
           key: _formKey,
           child: Column(
             children: [
-              _field(_nameController, 'Bike Name'),
-              _field(_plateController, 'Plate Number'),
-              _field(_mileageController, 'Mileage (km/l)'),
-              _field(_tankController, 'Fuel Tank Capacity (L)'),
-              _field(_petrolController, 'Current Petrol (L)'),
-              _field(_odometerController, 'Initial Odometer (km)'),
+              field(nameCtrl, 'Bike Name', number: false),
+              field(plateCtrl, 'Plate Number', number: false),
+              field(mileageCtrl, 'Mileage (km/l)'),
+              field(monthlyLimitCtrl, 'Monthly Limit (km)'),
+              field(petrolCtrl, 'Current Petrol (L)'),
+
+              // 🔒 Initial odometer only while adding
+              if (!isEdit)
+                field(initialOdoCtrl, 'Initial Odometer (km)'),
 
               const SizedBox(height: 24),
 
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _saving ? null : _saveBike,
+                  onPressed: saving ? null : saveBike,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.amber,
                     foregroundColor: Colors.black,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: _saving
+                  child: saving
                       ? const CircularProgressIndicator(
-                          color: Colors.black)
-                      : Text(
-                          isEdit ? 'Save Changes' : 'Add Bike',
-                        ),
+                          color: Colors.black,
+                        )
+                      : Text(isEdit ? 'Save Changes' : 'Add Bike'),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _field(TextEditingController c, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextFormField(
-        controller: c,
-        keyboardType: TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(labelText: label),
-        validator: (v) =>
-            v == null || v.isEmpty ? 'Required' : null,
       ),
     );
   }

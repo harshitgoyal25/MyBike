@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
-import 'models/bike_model.dart';
-import 'trip_calculator.dart';
-
-enum TripInputType { distance, odometer }
-
 class AddTripScreen extends StatefulWidget {
   final String bikeId;
+  final double currentOdometer;
 
-  const AddTripScreen({super.key, required this.bikeId});
+  const AddTripScreen({
+    super.key,
+    required this.bikeId,
+    required this.currentOdometer,
+  });
 
   @override
   State<AddTripScreen> createState() => _AddTripScreenState();
@@ -19,107 +19,78 @@ class AddTripScreen extends StatefulWidget {
 class _AddTripScreenState extends State<AddTripScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _distanceController = TextEditingController();
-  final _odometerController = TextEditingController();
-  final _petrolPriceController = TextEditingController();
+  final distanceController = TextEditingController();
+  final startOdoController = TextEditingController();
+  final endOdoController = TextEditingController();
 
-  DateTime _selectedDate = DateTime.now();
-  bool _saving = false;
+  DateTime date = DateTime.now();
+  bool saving = false;
+  bool useOdometer = false;
 
-  TripInputType _inputType = TripInputType.distance;
-
-  Future<void> _saveTrip() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _saving = true);
-
-    try {
-      // 1️⃣ Fetch bike
-      final bikeDoc = await FirebaseFirestore.instance
-          .collection('bikes')
-          .doc(widget.bikeId)
-          .get();
-
-      final bike = Bike.fromMap(bikeDoc.id, bikeDoc.data()!);
-
-      // 2️⃣ Fetch last trip (for odometer)
-      final lastTripSnap = await FirebaseFirestore.instance
-          .collection('bikes')
-          .doc(widget.bikeId)
-          .collection('trips')
-          .orderBy('endOdometer', descending: true)
-          .limit(1)
-          .get();
-
-      final lastOdometer = lastTripSnap.docs.isNotEmpty
-          ? (lastTripSnap.docs.first['endOdometer'] as num).toDouble()
-          : bike.initialOdometer;
-
-      // 3️⃣ Calculate trip
-      final result = calculateTrip(
-        bike: bike,
-        distanceInput: _inputType == TripInputType.distance
-            ? double.parse(_distanceController.text)
-            : null,
-        endOdometerInput: _inputType == TripInputType.odometer
-            ? double.parse(_odometerController.text)
-            : null,
-        lastOdometer: lastOdometer,
-        petrolPrice: double.parse(_petrolPriceController.text),
-      );
-
-      // 4️⃣ Save trip
-      await FirebaseFirestore.instance
-          .collection('bikes')
-          .doc(widget.bikeId)
-          .collection('trips')
-          .add({
-        'date': Timestamp.fromDate(_selectedDate),
-        'distance': result.distance,
-        'startOdometer': lastOdometer,
-        'endOdometer': result.endOdometer,
-        'petrolUsed': result.petrolUsed,
-        'petrolPrice': double.parse(_petrolPriceController.text),
-        'moneySpent': result.moneySpent,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // 5️⃣ Update bike petrol
-      await FirebaseFirestore.instance
-          .collection('bikes')
-          .doc(widget.bikeId)
-          .update({
-        'currentPetrol': result.updatedPetrol,
-      });
-
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
-    } finally {
-      setState(() => _saving = false);
-    }
+  @override
+  void initState() {
+    super.initState();
+    startOdoController.text =
+        widget.currentOdometer.toStringAsFixed(1);
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-    );
+  Future<void> saveTrip() async {
+    if (!_formKey.currentState!.validate()) return;
 
-    if (picked != null) {
-      setState(() => _selectedDate = picked);
+    double distance;
+    double newOdometer;
+
+    if (useOdometer) {
+      final start = double.parse(startOdoController.text);
+      final end = double.parse(endOdoController.text);
+
+      if (end <= start) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('End odometer must be greater'),
+          ),
+        );
+        return;
+      }
+
+      distance = end - start;
+      newOdometer = end;
+    } else {
+      distance = double.parse(distanceController.text);
+      newOdometer = widget.currentOdometer + distance;
     }
+
+    setState(() => saving = true);
+
+    final bikeRef =
+        FirebaseFirestore.instance.collection('bikes').doc(widget.bikeId);
+
+    final tripRef = bikeRef.collection('trips').doc();
+
+    await FirebaseFirestore.instance.runTransaction((txn) async {
+      txn.set(tripRef, {
+        'distance': distance,
+        'date': Timestamp.fromDate(date),
+        'createdAt': FieldValue.serverTimestamp(),
+        if (useOdometer) ...{
+          'startOdometer': double.parse(startOdoController.text),
+          'endOdometer': newOdometer,
+        },
+      });
+
+      txn.update(bikeRef, {
+        'currentOdometer': newOdometer,
+      });
+    });
+
+    if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
-    _distanceController.dispose();
-    _odometerController.dispose();
-    _petrolPriceController.dispose();
+    distanceController.dispose();
+    startOdoController.dispose();
+    endOdoController.dispose();
     super.dispose();
   }
 
@@ -130,9 +101,8 @@ class _AddTripScreenState extends State<AddTripScreen> {
         title: const Text('Add Trip'),
         backgroundColor: Colors.amber,
         foregroundColor: Colors.black,
-        centerTitle: true,
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
@@ -140,89 +110,61 @@ class _AddTripScreenState extends State<AddTripScreen> {
             children: [
               // 📅 Date
               ListTile(
-                leading: const Icon(Icons.calendar_month, color: Colors.amber),
-                title: Text(DateFormat('dd MMM yyyy').format(_selectedDate)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit_calendar),
-                  onPressed: _pickDate,
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // 🔀 Distance / Odometer Toggle
-              SegmentedButton<TripInputType>(
-                segments: const [
-                  ButtonSegment(
-                    value: TripInputType.distance,
-                    label: Text('Distance'),
-                  ),
-                  ButtonSegment(
-                    value: TripInputType.odometer,
-                    label: Text('Odometer'),
-                  ),
-                ],
-                selected: {_inputType},
-                onSelectionChanged: (v) {
-                  setState(() => _inputType = v.first);
+                title: Text(DateFormat('dd MMM yyyy').format(date)),
+                trailing: const Icon(Icons.calendar_today),
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: date,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (d != null) setState(() => date = d);
                 },
               ),
 
-              const SizedBox(height: 16),
+              SwitchListTile(
+                title: const Text('Use Odometer'),
+                value: useOdometer,
+                onChanged: (v) => setState(() => useOdometer = v),
+              ),
 
-              // 📏 Distance OR Odometer input
-              if (_inputType == TripInputType.distance)
+              if (!useOdometer)
                 TextFormField(
-                  controller: _distanceController,
-                  keyboardType: TextInputType.number,
+                  controller: distanceController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration:
                       const InputDecoration(labelText: 'Distance (km)'),
                   validator: (v) =>
-                      v == null || double.tryParse(v) == null
-                          ? 'Enter valid distance'
-                          : null,
-                )
-              else
-                TextFormField(
-                  controller: _odometerController,
-                  keyboardType: TextInputType.number,
-                  decoration:
-                      const InputDecoration(labelText: 'End Odometer (km)'),
-                  validator: (v) =>
-                      v == null || double.tryParse(v) == null
-                          ? 'Enter valid odometer'
-                          : null,
+                      v == null || v.isEmpty ? 'Required' : null,
                 ),
 
-              const SizedBox(height: 16),
-
-              // 💰 Petrol Price
-              TextFormField(
-                controller: _petrolPriceController,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Petrol Price (₹/litre)'),
-                validator: (v) =>
-                    v == null || double.tryParse(v) == null
-                        ? 'Enter valid price'
-                        : null,
-              ),
+              if (useOdometer) ...[
+                TextFormField(
+                  controller: startOdoController,
+                  decoration:
+                      const InputDecoration(labelText: 'Start Odometer'),
+                  enabled: false,
+                ),
+                TextFormField(
+                  controller: endOdoController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration:
+                      const InputDecoration(labelText: 'End Odometer'),
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Required' : null,
+                ),
+              ],
 
               const SizedBox(height: 24),
 
-              // 💾 Save
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _saving ? null : _saveTrip,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: _saving
-                      ? const CircularProgressIndicator(color: Colors.black)
-                      : const Text('Save Trip'),
+                  onPressed: saving ? null : saveTrip,
+                  child: const Text('Save Trip'),
                 ),
               ),
             ],
