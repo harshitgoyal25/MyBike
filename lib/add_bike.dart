@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'models/bike_model.dart';
+
 class AddBikeScreen extends StatefulWidget {
-  const AddBikeScreen({super.key});
+  final Bike? bike; // 👈 null = add, not null = edit
+
+  const AddBikeScreen({super.key, this.bike});
 
   @override
   State<AddBikeScreen> createState() => _AddBikeScreenState();
@@ -11,189 +15,144 @@ class AddBikeScreen extends StatefulWidget {
 class _AddBikeScreenState extends State<AddBikeScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _plateController = TextEditingController();
-  final TextEditingController _limitController = TextEditingController();
-  final TextEditingController _mileageController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _mileageController;
+  late TextEditingController _plateController;
+  late TextEditingController _tankController;
+  late TextEditingController _petrolController;
+  late TextEditingController _odometerController;
 
-  bool _isSaving = false;
+  bool _saving = false;
+
+  bool get isEdit => widget.bike != null;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _nameController =
+        TextEditingController(text: widget.bike?.name ?? '');
+    _mileageController =
+        TextEditingController(text: widget.bike?.mileage.toString() ?? '');
+    _plateController =
+        TextEditingController(text: widget.bike?.plate ?? '');
+    _tankController = TextEditingController(
+        text: widget.bike?.fuelTankCapacity.toString() ?? '');
+    _petrolController = TextEditingController(
+        text: widget.bike?.currentPetrol.toString() ?? '');
+    _odometerController = TextEditingController(
+        text: widget.bike?.initialOdometer.toString() ?? '');
+  }
 
   Future<void> _saveBike() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isSaving = true);
+    setState(() => _saving = true);
 
-    await FirebaseFirestore.instance.collection('bikes').add({
+    final data = {
       'name': _nameController.text.trim(),
-      'plate': _plateController.text.trim(),
-      'monthlyLimit': int.parse(_limitController.text),
       'mileage': double.parse(_mileageController.text),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+      'plate': _plateController.text.trim(),
+      'fuelTankCapacity': double.parse(_tankController.text),
+      'currentPetrol': double.parse(_petrolController.text),
+      'initialOdometer': double.parse(_odometerController.text),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
 
-    setState(() => _isSaving = false);
+    try {
+      final bikesRef =
+          FirebaseFirestore.instance.collection('bikes');
 
-    if (mounted) Navigator.pop(context);
+      if (isEdit) {
+        // ✏️ EDIT
+        await bikesRef.doc(widget.bike!.id).update(data);
+      } else {
+        // ➕ ADD
+        await bikesRef.add({
+          ...data,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      setState(() => _saving = false);
+    }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _plateController.dispose();
-    _limitController.dispose();
     _mileageController.dispose();
+    _plateController.dispose();
+    _tankController.dispose();
+    _petrolController.dispose();
+    _odometerController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      // 🌞 AMBER APP BAR
       appBar: AppBar(
-        title: const Text(
-          'Add Bike',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        title: Text(isEdit ? 'Edit Bike' : 'Add Bike'),
         backgroundColor: Colors.amber,
         foregroundColor: Colors.black,
-        elevation: 0,
         centerTitle: true,
       ),
-
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
           child: Column(
             children: [
-              // 🚲 FORM CARD
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: theme.dividerColor),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      // Bike name
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Bike Name',
-                          hintText: 'Discover 100',
-                          prefixIcon: Icon(Icons.motorcycle),
-                        ),
-                        validator: (value) =>
-                            value == null || value.isEmpty ? 'Required' : null,
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Number plate
-                      TextFormField(
-                        controller: _plateController,
-                        decoration: const InputDecoration(
-                          labelText: 'Number Plate',
-                          hintText: 'MP09AB1234',
-                          prefixIcon:
-                              Icon(Icons.confirmation_number_outlined),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Monthly limit
-                      TextFormField(
-                        controller: _limitController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Monthly Distance Limit (km)',
-                          hintText: '1000',
-                          prefixIcon: Icon(Icons.speed_outlined),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Required';
-                          }
-                          if (int.tryParse(value) == null) {
-                            return 'Enter a number';
-                          }
-                          return null;
-                        },
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // ⛽ MILEAGE
-                      TextFormField(
-                        controller: _mileageController,
-                        keyboardType:
-                            const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Mileage (km per litre)',
-                          hintText: '45',
-                          prefixIcon:
-                              Icon(Icons.local_gas_station_outlined),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Required';
-                          }
-                          final mileage = double.tryParse(value);
-                          if (mileage == null || mileage <= 0) {
-                            return 'Enter valid mileage';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              _field(_nameController, 'Bike Name'),
+              _field(_plateController, 'Plate Number'),
+              _field(_mileageController, 'Mileage (km/l)'),
+              _field(_tankController, 'Fuel Tank Capacity (L)'),
+              _field(_petrolController, 'Current Petrol (L)'),
+              _field(_odometerController, 'Initial Odometer (km)'),
 
               const SizedBox(height: 24),
 
-              // 💾 SAVE BUTTON
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
+                  onPressed: _saving ? null : _saveBike,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.amber,
                     foregroundColor: Colors.black,
                     padding:
                         const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
                   ),
-                  onPressed: _isSaving ? null : _saveBike,
-                  child: _isSaving
-                      ? const SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.black,
-                          ),
-                        )
-                      : const Text(
-                          'Save Bike',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  child: _saving
+                      ? const CircularProgressIndicator(
+                          color: Colors.black)
+                      : Text(
+                          isEdit ? 'Save Changes' : 'Add Bike',
                         ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController c, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextFormField(
+        controller: c,
+        keyboardType: TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(labelText: label),
+        validator: (v) =>
+            v == null || v.isEmpty ? 'Required' : null,
       ),
     );
   }

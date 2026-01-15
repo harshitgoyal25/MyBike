@@ -1,10 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Trip {
   final String id;
   final DateTime date;
 
-  final double? distance;        // km (optional)
-  final double? startOdometer;   // km (optional)
-  final double? endOdometer;     // km (optional)
+  final double? distance;        // km
+  final double? startOdometer;   // km
+  final double? endOdometer;     // km
 
   final double petrolUsed;       // litres
   final double petrolPrice;      // ₹/litre
@@ -23,7 +25,7 @@ class Trip {
 
   Map<String, dynamic> toMap() {
     return {
-      'date': date.toIso8601String(),
+      'date': date,
       'distance': distance,
       'startOdometer': startOdometer,
       'endOdometer': endOdometer,
@@ -36,19 +38,22 @@ class Trip {
   factory Trip.fromMap(String id, Map<String, dynamic> map) {
     return Trip(
       id: id,
-      date: DateTime.parse(map['date']),
-      distance: map['distance'] != null
-          ? (map['distance'] as num).toDouble()
-          : null,
-      startOdometer: map['startOdometer'] != null
-          ? (map['startOdometer'] as num).toDouble()
-          : null,
-      endOdometer: map['endOdometer'] != null
-          ? (map['endOdometer'] as num).toDouble()
-          : null,
-      petrolUsed: (map['petrolUsed'] as num).toDouble(),
-      petrolPrice: (map['petrolPrice'] as num).toDouble(),
-      moneySpent: (map['moneySpent'] as num).toDouble(),
+
+      // 🔐 date safe handling
+      date: map['date'] is Timestamp
+          ? (map['date'] as Timestamp).toDate()
+          : DateTime.tryParse(map['date']?.toString() ?? '') ??
+              DateTime.now(),
+
+      // 🔢 optional fields
+      distance: (map['distance'] as num?)?.toDouble(),
+      startOdometer: (map['startOdometer'] as num?)?.toDouble(),
+      endOdometer: (map['endOdometer'] as num?)?.toDouble(),
+
+      // 🔢 required but safe
+      petrolUsed: (map['petrolUsed'] as num?)?.toDouble() ?? 0.0,
+      petrolPrice: (map['petrolPrice'] as num?)?.toDouble() ?? 0.0,
+      moneySpent: (map['moneySpent'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }

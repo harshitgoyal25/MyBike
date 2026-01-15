@@ -4,21 +4,22 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 
+import 'add_bike.dart';
 import 'add_trip.dart';
 import 'edit_trip.dart';
+import 'models/bike_model.dart';
 
 class BikeDetailsScreen extends StatelessWidget {
   final String bikeId;
 
   const BikeDetailsScreen({super.key, required this.bikeId});
 
-  // 🚨 Challan helper (copy plate + open site)
+  // 🚨 Challan helper
   Future<void> _openChallanWithPlate(
     BuildContext context,
     String plateNumber,
   ) async {
     await Clipboard.setData(ClipboardData(text: plateNumber));
-
     final uri = Uri.parse('https://echallan.parivahan.gov.in');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
 
@@ -46,9 +47,7 @@ class BikeDetailsScreen extends StatelessWidget {
         ),
         backgroundColor: Colors.amber,
         foregroundColor: Colors.black,
-        elevation: 0,
         centerTitle: true,
-
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),
@@ -98,9 +97,11 @@ class BikeDetailsScreen extends StatelessWidget {
 
           final bikeData = bikeSnapshot.data!.data() as Map<String, dynamic>;
 
-          final int monthlyLimit = bikeData['monthlyLimit'] ?? 0;
           final double mileage = (bikeData['mileage'] as num?)?.toDouble() ?? 0;
           final String plate = bikeData['plate']?.toString() ?? '';
+          final int monthlyLimit = bikeData['monthlyLimit'] ?? 0;
+
+          final bike = Bike.fromMap(bikeId, bikeData);
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -126,10 +127,7 @@ class BikeDetailsScreen extends StatelessWidget {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              bikeData['name'] ?? 'Bike',
-                              style: theme.textTheme.titleLarge,
-                            ),
+                            Text(bike.name, style: theme.textTheme.titleLarge),
                             const SizedBox(height: 4),
                             Text(
                               'Mileage: ${mileage > 0 ? mileage.toStringAsFixed(1) : '-'} km/l',
@@ -146,7 +144,7 @@ class BikeDetailsScreen extends StatelessWidget {
 
                 const SizedBox(height: 16),
 
-                // 📊 CURRENT MONTH STATS
+                // 📊 MONTH STATS
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('bikes')
@@ -165,7 +163,7 @@ class BikeDetailsScreen extends StatelessWidget {
                     double driven = 0;
                     if (snapshot.hasData) {
                       for (var doc in snapshot.data!.docs) {
-                        driven += (doc['distance'] as num).toDouble();
+                        driven += (doc['distance'] as num?)?.toDouble() ?? 0;
                       }
                     }
 
@@ -174,14 +172,6 @@ class BikeDetailsScreen extends StatelessWidget {
                     final perDay = remainingDays > 0
                         ? remainingKm / remainingDays
                         : 0;
-
-                    final petrolLimit = mileage > 0
-                        ? monthlyLimit / mileage
-                        : null;
-
-                    final petrolRemaining = mileage > 0
-                        ? remainingKm / mileage
-                        : null;
 
                     return GridView(
                       shrinkWrap: true,
@@ -215,25 +205,7 @@ class BikeDetailsScreen extends StatelessWidget {
                         _statCard(
                           icon: Icons.trending_up,
                           title: 'Km / Day',
-                          value: '${perDay.toStringAsFixed(1)}',
-                        ),
-                        _statCard(
-                          icon: Icons.local_gas_station_outlined,
-                          title: 'Petrol (Limit)',
-                          value: petrolLimit == null
-                              ? '-'
-                              : '${petrolLimit.toStringAsFixed(2)} L',
-                        ),
-                        _statCard(
-                          icon: Icons.local_gas_station_outlined,
-                          title: 'Petrol (Remaining)',
-                          value: petrolRemaining == null
-                              ? '-'
-                              : '${petrolRemaining.toStringAsFixed(2)} L',
-                          valueColor:
-                              petrolRemaining != null && petrolRemaining < 0
-                              ? Colors.red
-                              : null,
+                          value: perDay.toStringAsFixed(1),
                         ),
                       ],
                     );
@@ -273,12 +245,27 @@ class BikeDetailsScreen extends StatelessWidget {
                             : () => _openChallanWithPlate(context, plate),
                       ),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Edit'),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AddBikeScreen(bike: bike),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ],
                 ),
 
                 const SizedBox(height: 16),
 
-                // 📋 TRIPS
+                // 📋 TRIPS (Swipe + Undo)
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
@@ -300,34 +287,104 @@ class BikeDetailsScreen extends StatelessWidget {
                         itemCount: snapshot.data!.docs.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
-                          final trip = snapshot.data!.docs[index];
-                          final date = (trip['date'] as Timestamp).toDate();
+                          final tripDoc = snapshot.data!.docs[index];
+                          final tripData =
+                              tripDoc.data() as Map<String, dynamic>;
+                          final date = (tripData['date'] as Timestamp).toDate();
 
-                          return Card(
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              side: BorderSide(color: theme.dividerColor),
-                            ),
-                            child: ListTile(
-                              leading: const Icon(Icons.route_outlined),
-                              title: Text('${trip['distance']} km'),
-                              subtitle: Text(
-                                DateFormat('dd MMM yyyy').format(date),
+                          return Dismissible(
+                            key: ValueKey(tripDoc.id),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
                               ),
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => EditTripScreen(
-                                      bikeId: bikeId,
-                                      tripId: trip.id,
-                                      distance: (trip['distance'] as num)
-                                          .toDouble(),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
+                            ),
+                            confirmDismiss: (_) async {
+                              final deletedTrip = Map<String, dynamic>.from(
+                                tripData,
+                              );
+                              final tripId = tripDoc.id;
+                              final double petrolUsed =
+                                  (tripData['petrolUsed'] as num?)
+                                      ?.toDouble() ??
+                                  0;
+
+                              await tripDoc.reference.delete();
+
+                              await FirebaseFirestore.instance
+                                  .collection('bikes')
+                                  .doc(bikeId)
+                                  .update({
+                                    'currentPetrol': FieldValue.increment(
+                                      petrolUsed,
                                     ),
+                                  });
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text('Trip deleted'),
+                                  action: SnackBarAction(
+                                    label: 'UNDO',
+                                    onPressed: () async {
+                                      await FirebaseFirestore.instance
+                                          .collection('bikes')
+                                          .doc(bikeId)
+                                          .collection('trips')
+                                          .doc(tripId)
+                                          .set(deletedTrip);
+
+                                      await FirebaseFirestore.instance
+                                          .collection('bikes')
+                                          .doc(bikeId)
+                                          .update({
+                                            'currentPetrol':
+                                                FieldValue.increment(
+                                                  -petrolUsed,
+                                                ),
+                                          });
+                                    },
                                   ),
-                                );
-                              },
+                                ),
+                              );
+
+                              return true;
+                            },
+                            child: Card(
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: theme.dividerColor),
+                              ),
+                              child: ListTile(
+                                leading: const Icon(Icons.route_outlined),
+                                title: Text('${tripData['distance']} km'),
+                                subtitle: Text(
+                                  DateFormat('dd MMM yyyy').format(date),
+                                ),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => EditTripScreen(
+                                        bikeId: bikeId,
+                                        tripId: tripDoc.id,
+                                        distance: (tripData['distance'] as num)
+                                            .toDouble(),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           );
                         },
@@ -362,7 +419,6 @@ class BikeDetailsScreen extends StatelessWidget {
             Text(
               title,
               style: const TextStyle(color: Colors.grey, fontSize: 13),
-              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
             Text(
