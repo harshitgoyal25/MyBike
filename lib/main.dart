@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:mybike/services/petrol_price_updater.dart';
 
 import 'home.dart';
 import 'add_bike.dart';
@@ -10,6 +11,9 @@ Future<void> main() async {
 
   // 👇 Firebase initialization
   await Firebase.initializeApp();
+
+  await PetrolPriceUpdater.updateIfNeeded();
+
 
   runApp(const MainApp());
 }

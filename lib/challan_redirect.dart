@@ -12,7 +12,7 @@ Future<void> openChallanPortalWithPlate(
   );
 
   // 🌐 Open official site
-  final uri = Uri.parse('https://echallan.parivahan.gov.in');
+  final uri = Uri.parse('https://echallan.mponline.gov.in');
   await launchUrl(
     uri,
     mode: LaunchMode.externalApplication,
