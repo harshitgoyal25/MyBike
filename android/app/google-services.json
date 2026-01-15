@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "648090214452",
+    "project_id": "mybike-557c5",
+    "storage_bucket": "mybike-557c5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648090214452:android:f2316ba1fc6121cca1ea61",
+        "android_client_info": {
+          "package_name": "com.example.mybike"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC5EqrSZrUZUG3BUPOBCugEqLF7tSbDiFc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
